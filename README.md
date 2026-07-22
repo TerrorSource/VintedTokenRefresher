@@ -53,20 +53,38 @@ No proxies, no browser engine, one small sidecar container.
 4. Edit `docker-compose.yml` so the **first** volume points to the SAME data folder as your
    vinted-notifications container (the one containing `vinted_notifications.db`).
 
+## Image
+
+A prebuilt image is published to GitHub Container Registry automatically on every push
+(via the included GitHub Actions workflow):
+
+```
+ghcr.io/terrorsource/vintedtokenrefresher:latest
+```
+
+No local build needed. If you fork this repo, the workflow publishes under your own
+username; update the `image:` line in `docker-compose.yml` accordingly. Make sure the
+package is set to **public** in GitHub (Packages -> the package -> Package settings ->
+Change visibility) if you want Portainer to pull it without registry credentials.
+
 ## Deploy in Portainer
 
-This repo is built from source, so use Portainer's **Repository** method:
+The compose pulls a ready-made image, so use Portainer's **Web editor** method:
 
 1. Portainer -> Stacks -> **Add stack** -> name it e.g. `vinted-token-refresher`.
-2. Build method: **Repository**.
-3. Repository URL: your clone of this repo. Reference: `refs/heads/main`.
-   Compose path: `docker-compose.yml`.
-4. Deploy the stack. Portainer builds the image from the `Dockerfile` and starts it.
+2. Build method: **Web editor**.
+3. Paste the contents of `docker-compose.yml`, adjusting the volume host paths to match
+   your setup.
+4. Deploy the stack. Portainer pulls the image and starts it.
 5. Check the container logs. You want to see:
    `OK: access token refreshed and written to DB.`
 
 6. Restart your **vinted-notifications** container once so it picks up the new headers from
    the DB. (Not needed afterwards; the app reads the DB on every scrape.)
+
+(You can also use the **Repository** method pointing at this repo with compose path
+`docker-compose.yml` — since the compose references a registry image, no Dockerfile build
+happens either way.)
 
 ## Environment variables
 

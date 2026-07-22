@@ -2,9 +2,7 @@ version: "3"
 services:
   vinted-token-refresher:
     container_name: vinted-token-refresher
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/terrorsource/vintedtokenrefresher:latest
     init: true
     restart: unless-stopped
     network_mode: bridge
