@@ -1,0 +1,5 @@
+{
+  "refresh_token_web": "PASTE_YOUR_REFRESH_TOKEN_WEB_HERE",
+  "datadome": "PASTE_YOUR_DATADOME_COOKIE_HERE",
+  "cf_clearance": "PASTE_YOUR_CF_CLEARANCE_COOKIE_HERE_OPTIONAL"
+}

@@ -2,19 +2,23 @@ version: "3"
 services:
   vinted-token-refresher:
     container_name: vinted-token-refresher
-    build: .
-    # of, als je 't image lokaal bouwt en pusht: image: vinted-token-refresher:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     init: true
     restart: unless-stopped
     network_mode: bridge
     environment:
       - TZ=Europe/Amsterdam
-      - REFRESH_INTERVAL=3600            # elk uur (access-token leeft 2u, dus ruime marge)
+      - REFRESH_INTERVAL=3600            # every hour (access token lives 2h, so plenty of margin)
       - VINTED_LOCALE=www.vinted.nl
       - VN_DB_PATH=/data/vinted_notifications.db
       - STATE_PATH=/state/state.json
+      # Keep the Chrome version below in sync with the Sec-Ch-Ua header in refresh.py:
+      - USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
     volumes:
-      # ZELFDE data-map als je vinted-notifications container, zodat we in dezelfde DB schrijven:
+      # SAME data folder as your vinted-notifications container, so we write to the same DB.
+      # Adjust the host path to match YOUR vinted-notifications data volume:
       - /share/CACHEDEV1_DATA/Docker/vinted-notifications/data:/data
-      # eigen state-map voor de roterende refresh-token:
+      # Dedicated state folder for the rotating refresh token:
       - /share/CACHEDEV1_DATA/Docker/vinted-token-refresher/state:/state
