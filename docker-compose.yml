@@ -1,0 +1,20 @@
+version: "3"
+services:
+  vinted-token-refresher:
+    container_name: vinted-token-refresher
+    build: .
+    # of, als je 't image lokaal bouwt en pusht: image: vinted-token-refresher:latest
+    init: true
+    restart: unless-stopped
+    network_mode: bridge
+    environment:
+      - TZ=Europe/Amsterdam
+      - REFRESH_INTERVAL=3600            # elk uur (access-token leeft 2u, dus ruime marge)
+      - VINTED_LOCALE=www.vinted.nl
+      - VN_DB_PATH=/data/vinted_notifications.db
+      - STATE_PATH=/state/state.json
+    volumes:
+      # ZELFDE data-map als je vinted-notifications container, zodat we in dezelfde DB schrijven:
+      - /share/CACHEDEV1_DATA/Docker/vinted-notifications/data:/data
+      # eigen state-map voor de roterende refresh-token:
+      - /share/CACHEDEV1_DATA/Docker/vinted-token-refresher/state:/state
