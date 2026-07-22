@@ -13,7 +13,6 @@ browser (see README).
 import json
 import os
 import sqlite3
-import sys
 import time
 import traceback
 
@@ -55,12 +54,12 @@ def load_state():
     if not os.path.exists(STATE_PATH):
         log(f"ERROR: {STATE_PATH} does not exist. Create it with your "
             f"refresh_token_web and datadome from the browser. See README.")
-        sys.exit(1)
+        return None
     with open(STATE_PATH) as f:
         state = json.load(f)
     if not state.get("refresh_token_web"):
         log("ERROR: refresh_token_web missing in state.json")
-        sys.exit(1)
+        return None
     return state
 
 
@@ -132,6 +131,10 @@ def main():
     while True:
         try:
             state = load_state()
+            if state is None:
+                log("Waiting for a valid state.json; retrying in 60s.")
+                time.sleep(60)
+                continue
             access_token, new_state = do_refresh(state)
             save_state(new_state)
             write_to_db(access_token)
