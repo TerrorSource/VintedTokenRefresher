@@ -1,0 +1,8 @@
+# Never commit real credentials
+state/
+state.json
+*.json.tmp
+
+# Python
+__pycache__/
+*.pyc
