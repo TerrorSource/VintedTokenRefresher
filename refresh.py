@@ -159,16 +159,28 @@ def describe_chain(state):
             f"({age / 60:.0f} min ago), {life}")
 
 
+# Keys in state.json that are bookkeeping, not cookies to send along.
+NON_COOKIE_KEYS = {"previous_refresh_tokens", "note", "notes"}
+
+
+def cookies_from(state):
+    """
+    Every string in state.json is sent as a cookie.
+
+    Vinted decides for itself which cookies a refresh needs, and that has
+    changed before. Rather than hard-code three names, paste whatever the
+    browser has -- v_udt, anon_id, __cf_bm -- and it goes along without a code
+    change. Only refresh_token_web is required.
+    """
+    return {k: v for k, v in state.items()
+            if k not in NON_COOKIE_KEYS and isinstance(v, str) and v.strip()}
+
+
 def do_refresh(state):
     """Call the refresh endpoint. Returns (access_token, new_state)."""
     s = requests.Session()
     s.headers.update({"User-Agent": USER_AGENT, **BASE_HEADERS, "Origin": f"https://{LOCALE}"})
-    cookies = {"refresh_token_web": state["refresh_token_web"]}
-    if state.get("datadome"):
-        cookies["datadome"] = state["datadome"]
-    if state.get("cf_clearance"):
-        cookies["cf_clearance"] = state["cf_clearance"]
-    s.cookies.update(cookies)
+    s.cookies.update(cookies_from(state))
 
     r = s.post(REFRESH_URL, timeout=20)
     if r.status_code in (400, 401):
@@ -190,11 +202,19 @@ def do_refresh(state):
     new_datadome = s.cookies.get("datadome") or state.get("datadome")
     new_cf = s.cookies.get("cf_clearance") or state.get("cf_clearance")
 
-    new_state = {
-        "refresh_token_web": new_refresh,
-        "datadome": new_datadome,
-        "cf_clearance": new_cf,
-    }
+    # Keep everything else that was pasted; only the rotated values change.
+    # Harvest the jar FIRST and set the rotated token last: the jar still holds
+    # the refresh token we sent, so doing it the other way round would write the
+    # spent token back over the new one and kill the chain on every success.
+    new_state = dict(state)
+    for name, value in s.cookies.items():          # anything Vinted reissued
+        if name in state and value:
+            new_state[name] = value
+    new_state["refresh_token_web"] = new_refresh
+    if new_datadome:
+        new_state["datadome"] = new_datadome
+    if new_cf:
+        new_state["cf_clearance"] = new_cf
     return access_token, new_state
 
 

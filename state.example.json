@@ -1,5 +1,9 @@
 {
   "refresh_token_web": "PASTE_YOUR_REFRESH_TOKEN_WEB_HERE",
   "datadome": "PASTE_YOUR_DATADOME_COOKIE_HERE",
-  "cf_clearance": "PASTE_YOUR_CF_CLEARANCE_COOKIE_HERE_OPTIONAL"
+  "cf_clearance": "PASTE_YOUR_CF_CLEARANCE_COOKIE_HERE_OPTIONAL",
+
+  "_comment": "Every string above is sent as a cookie. If a refresh is refused, copy the rest of the vinted.nl cookies in here too -- v_udt and anon_id are the usual suspects -- and remove this comment line.",
+  "v_udt": "",
+  "anon_id": ""
 }

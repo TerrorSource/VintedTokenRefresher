@@ -31,6 +31,24 @@ No proxies, no browser engine, one small sidecar container.
   under **Advanced Settings** (a real Chrome `User Agents` entry + `Default Headers`). This
   refresher writes into that same `Default Headers` field.
 
+## Getting the cookies without losing the race
+
+`refresh_token_web` is single use: the moment your browser refreshes its session, the copy
+you took by hand is dead. Copying it out of DevTools takes a minute or two, and that is
+long enough to lose that race.
+
+`vinted-state.user.js` in this repo does the whole grab in one click. Install
+[Tampermonkey](https://www.tampermonkey.net/), open the dashboard, create a new script and
+paste the file in. Then on vinted.nl, pick **Get state.json for the containers** from the
+Tampermonkey menu. It reads the cookies — including the HttpOnly ones a page script can
+never see — shows how old the token is, and gives you the file to copy or download. It also
+prints your user agent for `USER_AGENT` in docker-compose, which has to match the browser
+the cookies came from.
+
+If you run `vinted-reposter`, **Send to reposter…** posts the cookies straight into it and
+it refreshes on the spot, so the window your browser has to rotate the token away shrinks
+from minutes to about a second.
+
 ## One-time setup
 
 1. Create the state folder on your host, e.g.:
@@ -41,7 +59,10 @@ No proxies, no browser engine, one small sidecar container.
    - `datadome`
    - `cf_clearance` (optional, helps with Cloudflare)
 
-3. Create `state/state.json` in that folder, based on `state.example.json`:
+3. Create `state/state.json` in that folder, based on `state.example.json`. **Every string
+   in it is sent as a cookie**, so if Vinted starts refusing the refresh you can paste the
+   rest of your vinted.nl cookies in beside these three (`v_udt` and `anon_id` first) without
+   waiting for a code change:
    ```json
    {
      "refresh_token_web": "PASTE_YOUR_REFRESH_TOKEN_WEB_HERE",
