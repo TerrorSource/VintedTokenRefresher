@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vinted state.json helper
 // @namespace    https://github.com/terrorsource
-// @version      1.2.0
+// @version      2.0.0
 // @description  Reads the vinted.nl cookies -- including the HttpOnly ones a page cannot see -- and hands you the state.json that vinted-token-refresher and vinted-reposter expect.
 // @author       -
 // @match        https://www.vinted.nl/*
@@ -17,6 +17,12 @@
 // ==/UserScript==
 
 /*
+ * 2.0.0  cleanup once the cause was found: the refresh needs no headers, so
+ *        the CSRF capture and the fetch/XHR interception are gone. What it
+ *        needed all along was the access_token_web cookie.
+ * 1.4.0  listened in on the app's own refresh call (served its purpose).
+ * 1.3.0  includes access_token_web -- the browser sends it along on a refresh
+ *        and we never did.
  * 1.2.0  captures the CSRF token as x_csrf_token, and adds "Test refresh from
  *        this page" -- which answers, from inside a session Vinted accepts,
  *        whether the refresh needs that header at all.
@@ -48,6 +54,7 @@
   // but keeping the file readable beats dumping analytics cookies into it.
   const WANTED = [
     "refresh_token_web",   // the only one that is strictly required
+    "access_token_web",    // expired is fine: the refresh seems to want it present
     "datadome",
     "cf_clearance",
     "v_udt",               // Vinted's device token
@@ -88,56 +95,23 @@
       : WANTED.filter(n => jar[n]);
     const state = {};
     names.forEach(n => { if (jar[n]) state[n] = jar[n]; });
-    // Not a cookie: the app sends this as a header on every write, and the
-    // refresh goes through the same client. The container sends it as
-    // X-CSRF-Token when this key is present.
-    const csrf = readCsrf();
-    if (csrf) state.x_csrf_token = csrf;
     return state;
-  }
-
-  function readCsrf() {
-    const m = document.documentElement.innerHTML
-      .match(/CSRF_TOKEN\\?"\s*:\s*\\?"([0-9a-fA-F-]{36})/);
-    return m ? m[1] : null;
   }
 
   // ---- what does this endpoint actually want? ------------------------------
 
   async function diagnose(msg) {
-    // Only the browser can answer this: it has a session that Vinted accepts.
-    // A refresh rotates the token, so the cookies are re-read afterwards and
-    // the panel then shows the new one.
-    const call = async withCsrf => {
-      const headers = {};
-      const csrf = readCsrf();
-      if (withCsrf) {
-        if (!csrf) return "no CSRF token found on this page";
-        headers["X-CSRF-Token"] = csrf;
-      }
-      const r = await fetch("/web/api/auth/refresh", {
-        method: "POST", credentials: "include", headers,
-      });
-      return r.status;
-    };
-
-    msg("Trying a refresh the way the container does it (no CSRF header)…");
-    const plain = await call(false);
-    if (plain === 200) {
-      msg("Without a CSRF header it works from this page — so the container is refused "
-        + "for another reason than CSRF. Reload the cookies for the new token.");
-      return;
-    }
-    msg(`Without CSRF: HTTP ${plain}. Trying again with the header the app sends…`);
-    const withHeader = await call(true);
-    if (withHeader === 200) {
-      msg("With X-CSRF-Token it works. That header was the missing piece — the token is "
-        + "in the file below as x_csrf_token, and the container sends it. Press Reload "
-        + "cookies to pick up the rotated token, then put the file in place.");
-    } else {
-      msg(`With CSRF: HTTP ${withHeader}. So it is neither the token nor the CSRF header; `
-        + "the session itself is being refused. Logging out and back in is the next step.");
-    }
+    // Only the browser can answer this: it has a session Vinted accepts. A
+    // refresh rotates the token, so reload the cookies afterwards.
+    msg("Refreshing from this page…");
+    const r = await fetch("/web/api/auth/refresh", {
+      method: "POST", credentials: "include",
+    });
+    msg(r.ok
+      ? "The session is healthy and the token has just rotated — press Reload cookies, "
+        + "then put the file in place."
+      : `Vinted refused it from this page too (HTTP ${r.status}). Logging out and back `
+        + "in is the next step; this session is spent.");
   }
 
   function jwtClaims(token) {
