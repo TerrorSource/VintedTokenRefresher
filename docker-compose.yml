@@ -12,8 +12,9 @@ services:
       - VINTED_LOCALE=www.vinted.nl
       - VN_DB_PATH=/data/vinted_notifications.db
       - STATE_PATH=/state/state.json
-      # Keep the Chrome version below in sync with the Sec-Ch-Ua header in refresh.py:
-      - USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
+      # Set this to the browser your datadome cookie comes from (chrome://version).
+      # The Sec-Ch-Ua headers are derived from it, so they cannot drift out of step:
+      - USER_AGENT=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36
     volumes:
       # SAME data folder as your vinted-notifications container, so we write to the same DB.
       # Adjust the host path to match YOUR vinted-notifications data volume:

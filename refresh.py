@@ -10,8 +10,10 @@ the container survives restarts.
 First run: populate state.json with your refresh_token_web and datadome from the
 browser (see README).
 """
+import base64
 import json
 import os
+import re
 import sqlite3
 import time
 import traceback
@@ -21,6 +23,8 @@ import requests
 # ---- Configuration via environment ----
 DB_PATH = os.environ.get("VN_DB_PATH", "/data/vinted_notifications.db")
 STATE_PATH = os.environ.get("STATE_PATH", "/state/state.json")
+# Consumed by the vinted-reposter sidecar; harmless if nothing reads it.
+TOKEN_PATH = os.environ.get("TOKEN_PATH", "/state/token.json")
 REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL", "3600"))  # 1 hour
 LOCALE = os.environ.get("VINTED_LOCALE", "www.vinted.nl")
 USER_AGENT = os.environ.get(
@@ -31,14 +35,42 @@ USER_AGENT = os.environ.get(
 
 REFRESH_URL = f"https://{LOCALE}/web/api/auth/refresh"
 
-# Base headers written alongside the access-token cookie into default_headers.
-# These match the fingerprint; keep the Chrome version here in sync with USER_AGENT.
+
+def client_hints(user_agent):
+    """
+    Derive the Sec-Ch-Ua headers from the user agent instead of hard-coding them.
+
+    A datadome cookie is issued against a browser fingerprint. Copy one from
+    Chrome on a Mac and send it back with headers claiming Chrome on Windows and
+    it is suspect from the first request -- which is how a working setup starts
+    collecting CAPTCHAs. Deriving them means setting USER_AGENT is enough.
+    """
+    version = re.search(r"Chrome/(\d+)", user_agent)
+    version = version.group(1) if version else "138"
+    if "Windows" in user_agent:
+        platform = "Windows"
+    elif "Mac OS X" in user_agent or "Macintosh" in user_agent:
+        platform = "macOS"
+    elif "Android" in user_agent:
+        platform = "Android"
+    elif "Linux" in user_agent:
+        platform = "Linux"
+    else:
+        platform = "Unknown"
+    return {
+        "Sec-Ch-Ua": f'"Not)A;Brand";v="8", "Chromium";v="{version}", '
+                     f'"Google Chrome";v="{version}"',
+        "Sec-Ch-Ua-Mobile": "?1" if "Mobile" in user_agent else "?0",
+        "Sec-Ch-Ua-Platform": f'"{platform}"',
+    }
+
+
+# Base headers written alongside the access-token cookie into default_headers,
+# so Vinted-Notifications scrapes with the same fingerprint this container uses.
 BASE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8",
-    "Sec-Ch-Ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
+    **client_hints(USER_AGENT),
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-origin",
@@ -70,6 +102,46 @@ def save_state(state):
     os.replace(tmp, STATE_PATH)
 
 
+def save_token_file(access_token, state):
+    """Publish the fresh token for other containers (e.g. vinted-reposter)."""
+    payload = {
+        "access_token": access_token,
+        "obtained_at": int(time.time()),
+        "expires_at": int(time.time()) + 7200,   # Vinted access tokens live ~2h
+        "datadome": state.get("datadome"),
+        "cf_clearance": state.get("cf_clearance"),
+    }
+    tmp = TOKEN_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(payload, f, indent=2)
+    os.replace(tmp, TOKEN_PATH)
+
+
+class ChainDead(RuntimeError):
+    """The refresh token is gone. Only fresh browser cookies fix this."""
+
+
+def token_expiry(token):
+    """Vinted's tokens are plain JWTs; the refresh one lives exactly 7 days."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload)).get("exp")
+    except Exception:
+        return None
+
+
+def describe_chain(state):
+    """A word about how much life the stored refresh token has left."""
+    exp = token_expiry(state.get("refresh_token_web", ""))
+    if not exp:
+        return None
+    left = exp - time.time()
+    if left <= 0:
+        return f"the stored refresh token expired {abs(left) / 86400:.1f} days ago"
+    return f"the stored refresh token is valid for another {left / 86400:.1f} days"
+
+
 def do_refresh(state):
     """Call the refresh endpoint. Returns (access_token, new_state)."""
     s = requests.Session()
@@ -82,6 +154,12 @@ def do_refresh(state):
     s.cookies.update(cookies)
 
     r = s.post(REFRESH_URL, timeout=20)
+    if r.status_code in (400, 401):
+        # Vinted answers 400 with an empty body for a refresh token it no longer
+        # knows: expired, or rotated away by something else using the same one.
+        # Retrying cannot fix it, so say what will.
+        raise ChainDead(f"Vinted rejected the refresh token (HTTP {r.status_code}). "
+                        f"{describe_chain(state) or 'no expiry readable from it'}.")
     if r.status_code != 200:
         raise RuntimeError(f"refresh returned status {r.status_code}: {r.text[:200]}")
 
@@ -128,6 +206,7 @@ def write_to_db(access_token):
 
 def main():
     log(f"Vinted token refresher started. endpoint={REFRESH_URL} interval={REFRESH_INTERVAL}s")
+    complained = False          # only report a dead chain once
     while True:
         try:
             state = load_state()
@@ -137,12 +216,25 @@ def main():
                 continue
             access_token, new_state = do_refresh(state)
             save_state(new_state)
+            save_token_file(access_token, new_state)
             write_to_db(access_token)
             log("OK: access token refreshed and written to DB. "
-                "refresh_token + datadome rotated and persisted.")
+                f"{describe_chain(new_state) or 'refresh token rotated'}.")
+            complained = False
+        except ChainDead as e:
+            # Nothing to retry: an hourly stack trace only buries the one line
+            # that matters, so say it once and then keep quiet about it.
+            if not complained:
+                log(f"STOPPED: {e}")
+                log("Paste a fresh refresh_token_web and datadome from your browser "
+                    "(DevTools -> Application -> Cookies) into state.json, or enter "
+                    "them under Settings in the vinted-reposter web UI if it shares "
+                    "this state folder. Retrying hourly in the meantime, silently.")
+                complained = True
         except Exception as e:
             log(f"ERROR during refresh: {e}")
             traceback.print_exc()
+            complained = False
         time.sleep(REFRESH_INTERVAL)
 
 

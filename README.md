@@ -98,11 +98,23 @@ happens either way.)
 
 ## Notes & troubleshooting
 
-- Keep the Chrome version in `USER_AGENT` and in the `Sec-Ch-Ua` header (in `refresh.py`)
-  in sync, and ideally matching the fingerprint set in the Vinted-Notifications UI.
-- If refresh stops working (e.g. after a password change, or after the container was off
-  long enough for the refresh token to expire), the refresh token is dead: repeat steps 2-3
-  with fresh cookies from the browser.
+- Set `USER_AGENT` to the browser your `datadome` cookie actually comes from
+  (`chrome://version`). The `Sec-Ch-Ua` headers are derived from it, so they cannot drift
+  out of step. A cookie issued to Chrome on a Mac that arrives with headers claiming
+  Windows is suspect from the first request — that is how a working setup starts
+  collecting CAPTCHAs. The same headers are written into the Vinted-Notifications
+  `default_headers`, so its scraping keeps the same fingerprint.
+- The refresh token lives **exactly 7 days**, and every successful refresh resets that
+  clock. So the chain only dies if this container cannot reach Vinted for a week — or if
+  something else used the same refresh token in the meantime. Vinted rotates the token on
+  every use and kills the previous one, so **only one thing may own the chain**: run this
+  container and `vinted-reposter` off the *same* `state.json`, never off two copies of it.
+- When the chain does die, Vinted answers `HTTP 400` with an empty body. The container
+  recognises that, logs one line saying how long the token has been expired and what to do,
+  and then stops repeating itself instead of printing a stack trace every hour. The cure is
+  always the same: paste a fresh `refresh_token_web` and `datadome` from the browser
+  (steps 2-3), or enter them under **Settings** in the vinted-reposter web UI if it shares
+  this state folder.
 - **Never commit your real `state.json`.** The included `.gitignore` keeps `state/` and
   `state.json` out of Git. Only `state.example.json` (with placeholders) is tracked.
 
