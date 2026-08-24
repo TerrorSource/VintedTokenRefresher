@@ -227,6 +227,10 @@ def do_refresh(state):
         if name in state and value:
             new_state[name] = value
     new_state["refresh_token_web"] = new_refresh
+    # The refresh endpoint wants the access token sent along -- it identifies the
+    # session, and without it Vinted answers a bare 400 however valid the refresh
+    # token is. So keep the fresh one for the next round.
+    new_state["access_token_web"] = access_token
     if new_datadome:
         new_state["datadome"] = new_datadome
     if new_cf:

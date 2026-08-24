@@ -64,7 +64,10 @@ from minutes to about a second.
    - `cf_clearance` (optional, helps with Cloudflare)
 
 3. Create `state/state.json` in that folder, based on `state.example.json`. **Every string
-   in it is sent as a cookie**, so if Vinted starts refusing the refresh you can paste the
+   in it is sent as a cookie**, and `access_token_web` has to be one of them — the refresh
+   endpoint identifies the session by it and answers a bare `HTTP 400` without it, however
+   valid your refresh token is. That one cost an evening to find, so do not trim it out.
+   Beyond that, so if Vinted starts refusing the refresh you can paste the
    rest of your vinted.nl cookies in beside these three (`v_udt` and `anon_id` first) without
    waiting for a code change:
    ```json
