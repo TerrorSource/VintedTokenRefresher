@@ -18,7 +18,18 @@ import sqlite3
 import time
 import traceback
 
-import requests
+# Vinted sits behind Cloudflare and DataDome, which fingerprint the TLS
+# handshake and the HTTP/2 settings -- not just the headers. Python's requests
+# has a fingerprint of its own and does not even speak HTTP/2, and since August
+# 2026 the auth endpoint answers a bare HTTP 400 to it: the same refresh token
+# that a browser uses happily. curl_cffi presents Chrome's handshake, which no
+# amount of header-setting can imitate.
+try:
+    from curl_cffi import requests
+    IMPERSONATE = os.environ.get("IMPERSONATE", "chrome")
+except ImportError:                       # still runs, but Vinted will refuse
+    import requests
+    IMPERSONATE = None
 
 # ---- Configuration via environment ----
 DB_PATH = os.environ.get("VN_DB_PATH", "/data/vinted_notifications.db")
@@ -178,7 +189,7 @@ def cookies_from(state):
 
 def do_refresh(state):
     """Call the refresh endpoint. Returns (access_token, new_state)."""
-    s = requests.Session()
+    s = requests.Session(**({"impersonate": IMPERSONATE} if IMPERSONATE else {}))
     s.headers.update({"User-Agent": USER_AGENT, **BASE_HEADERS, "Origin": f"https://{LOCALE}"})
     # Vinted's own app sends this on every call that changes something, and the
     # refresh goes through the same client. Supply it via state.json and it
@@ -248,6 +259,12 @@ def write_to_db(access_token):
 
 def main():
     log(f"Vinted token refresher started. endpoint={REFRESH_URL} interval={REFRESH_INTERVAL}s")
+    if IMPERSONATE:
+        log(f"Using curl_cffi, impersonating {IMPERSONATE} -- Vinted fingerprints the TLS "
+            f"handshake, so a plain HTTP client is refused whatever the token says.")
+    else:
+        log("WARNING: curl_cffi is not installed, falling back to plain requests. Vinted "
+            "will answer 400 to that regardless of your token. Rebuild the image.")
     complained = False          # only report a dead chain once
     while True:
         try:
