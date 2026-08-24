@@ -131,15 +131,32 @@ def token_expiry(token):
         return None
 
 
+def token_claims(token):
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
 def describe_chain(state):
-    """A word about how much life the stored refresh token has left."""
-    exp = token_expiry(state.get("refresh_token_web", ""))
+    """
+    A word about the stored refresh token: which one it is, when it was issued,
+    and how much life is left. The identity matters as much as the expiry --
+    "still valid for 7 days" reads the same for a token you just pasted and for
+    the one that was already there, and those need very different fixes.
+    """
+    token = state.get("refresh_token_web", "")
+    claims = token_claims(token)
+    exp, iat = claims.get("exp"), claims.get("iat")
     if not exp:
         return None
-    left = exp - time.time()
-    if left <= 0:
-        return f"the stored refresh token expired {abs(left) / 86400:.1f} days ago"
-    return f"the stored refresh token is valid for another {left / 86400:.1f} days"
+    left, age = exp - time.time(), time.time() - (iat or 0)
+    life = (f"expired {abs(left) / 86400:.1f} days ago" if left <= 0
+            else f"valid for another {left / 86400:.1f} days")
+    return (f"token …{token[-8:]}, issued {time.strftime('%Y-%m-%d %H:%M', time.localtime(iat))} "
+            f"({age / 60:.0f} min ago), {life}")
 
 
 def do_refresh(state):
