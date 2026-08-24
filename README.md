@@ -41,7 +41,11 @@ long enough to lose that race.
 [Tampermonkey](https://www.tampermonkey.net/), open the dashboard, create a new script and
 paste the file in. Then on vinted.nl, pick **Get state.json for the containers** from the
 Tampermonkey menu. It reads the cookies — including the HttpOnly ones a page script can
-never see — shows how old the token is, and gives you the file to copy or download. It also
+never see — shows how old the token is and the same last-8-characters fingerprint the
+container logs, so you can tell at a glance whether the file in place is the one you just
+pulled. Downloads are saved with the time in the name (`state-2106.json`) because Chrome
+never overwrites: a second download becomes `state (1).json`, and the `state.json` sitting
+in Downloads is then the oldest one, not the newest. Rename it when you put it in place. It also
 prints your user agent for `USER_AGENT` in docker-compose, which has to match the browser
 the cookies came from.
 

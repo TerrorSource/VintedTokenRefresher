@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vinted state.json helper
 // @namespace    https://github.com/terrorsource
-// @version      1.0.0
+// @version      1.2.0
 // @description  Reads the vinted.nl cookies -- including the HttpOnly ones a page cannot see -- and hands you the state.json that vinted-token-refresher and vinted-reposter expect.
 // @author       -
 // @match        https://www.vinted.nl/*
@@ -17,6 +17,14 @@
 // ==/UserScript==
 
 /*
+ * 1.2.0  captures the CSRF token as x_csrf_token, and adds "Test refresh from
+ *        this page" -- which answers, from inside a session Vinted accepts,
+ *        whether the refresh needs that header at all.
+ * 1.1.0  shows the same token fingerprint the container logs, and stamps the
+ *        download name with the time (Chrome never overwrites a download, so
+ *        "state.json" in Downloads is the oldest one, not the newest).
+ * 1.0.0  first version.
+ *
  * Why this exists
  * ---------------
  * refresh_token_web is single use: the moment your browser refreshes its
@@ -80,7 +88,56 @@
       : WANTED.filter(n => jar[n]);
     const state = {};
     names.forEach(n => { if (jar[n]) state[n] = jar[n]; });
+    // Not a cookie: the app sends this as a header on every write, and the
+    // refresh goes through the same client. The container sends it as
+    // X-CSRF-Token when this key is present.
+    const csrf = readCsrf();
+    if (csrf) state.x_csrf_token = csrf;
     return state;
+  }
+
+  function readCsrf() {
+    const m = document.documentElement.innerHTML
+      .match(/CSRF_TOKEN\\?"\s*:\s*\\?"([0-9a-fA-F-]{36})/);
+    return m ? m[1] : null;
+  }
+
+  // ---- what does this endpoint actually want? ------------------------------
+
+  async function diagnose(msg) {
+    // Only the browser can answer this: it has a session that Vinted accepts.
+    // A refresh rotates the token, so the cookies are re-read afterwards and
+    // the panel then shows the new one.
+    const call = async withCsrf => {
+      const headers = {};
+      const csrf = readCsrf();
+      if (withCsrf) {
+        if (!csrf) return "no CSRF token found on this page";
+        headers["X-CSRF-Token"] = csrf;
+      }
+      const r = await fetch("/web/api/auth/refresh", {
+        method: "POST", credentials: "include", headers,
+      });
+      return r.status;
+    };
+
+    msg("Trying a refresh the way the container does it (no CSRF header)…");
+    const plain = await call(false);
+    if (plain === 200) {
+      msg("Without a CSRF header it works from this page — so the container is refused "
+        + "for another reason than CSRF. Reload the cookies for the new token.");
+      return;
+    }
+    msg(`Without CSRF: HTTP ${plain}. Trying again with the header the app sends…`);
+    const withHeader = await call(true);
+    if (withHeader === 200) {
+      msg("With X-CSRF-Token it works. That header was the missing piece — the token is "
+        + "in the file below as x_csrf_token, and the container sends it. Press Reload "
+        + "cookies to pick up the rotated token, then put the file in place.");
+    } else {
+      msg(`With CSRF: HTTP ${withHeader}. So it is neither the token nor the CSRF header; `
+        + "the session itself is being refused. Logging out and back in is the next step.");
+    }
   }
 
   function jwtClaims(token) {
@@ -99,10 +156,18 @@
     const now = Date.now() / 1000;
     const ageMin = Math.round((now - (c.iat || now)) / 60);
     const daysLeft = ((c.exp - now) / 86400).toFixed(1);
-    if (c.exp < now) return { ok: false, text: `this token expired ${(-daysLeft)} days ago` };
+    // The container logs the same last-8-characters fingerprint, so the two can
+    // be compared at a glance. Downloads are the trap here: Chrome never
+    // overwrites, it writes state (1).json, so "the file in Downloads" is
+    // easily the first one you ever pulled.
+    const fingerprint = `…${token.slice(-8)}`;
+    if (c.exp < now) {
+      return { ok: false, text: `token ${fingerprint} expired ${(-daysLeft)} days ago` };
+    }
     return {
       ok: true,
-      text: `issued ${ageMin} min ago, valid for another ${daysLeft} days`,
+      fingerprint,
+      text: `token ${fingerprint}, issued ${ageMin} min ago, valid for another ${daysLeft} days`,
       stale: ageMin > 5,
     };
   }
@@ -144,6 +209,7 @@
           <button id="vsh-save">Download state.json</button>
           <button id="vsh-reload">Reload cookies</button>
           <button id="vsh-all">Include every cookie</button>
+          <button id="vsh-diagnose">Test refresh from this page</button>
           <button id="vsh-push">Send to reposter…</button>
           <button id="vsh-close">Close</button>
         </div>
@@ -165,12 +231,18 @@
     wrap.querySelector("#vsh-save").onclick = () => {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
-      a.download = "state.json";
+      // Chrome never overwrites a download: the second one becomes
+      // "state (1).json" and the file you then grab from Downloads is the
+      // oldest, not the newest. Stamping the name makes the newest obvious --
+      // rename it to state.json when you put it in place.
+      a.download = `state-${new Date().toTimeString().slice(0, 5).replace(":", "")}.json`;
       a.click();
       URL.revokeObjectURL(a.href);
+      msg(`Saved as ${a.download} — rename it to state.json where the container reads it.`);
     };
     wrap.querySelector("#vsh-reload").onclick = () => show(false);
     wrap.querySelector("#vsh-all").onclick = () => show(true);
+    wrap.querySelector("#vsh-diagnose").onclick = () => diagnose(msg);
     wrap.querySelector("#vsh-push").onclick = () => push(state, msg);
   }
 

@@ -160,7 +160,7 @@ def describe_chain(state):
 
 
 # Keys in state.json that are bookkeeping, not cookies to send along.
-NON_COOKIE_KEYS = {"previous_refresh_tokens", "note", "notes"}
+NON_COOKIE_KEYS = {"previous_refresh_tokens", "note", "notes", "x_csrf_token"}
 
 
 def cookies_from(state):
@@ -180,6 +180,11 @@ def do_refresh(state):
     """Call the refresh endpoint. Returns (access_token, new_state)."""
     s = requests.Session()
     s.headers.update({"User-Agent": USER_AGENT, **BASE_HEADERS, "Origin": f"https://{LOCALE}"})
+    # Vinted's own app sends this on every call that changes something, and the
+    # refresh goes through the same client. Supply it via state.json and it
+    # travels as a header rather than a cookie.
+    if state.get("x_csrf_token"):
+        s.headers["X-CSRF-Token"] = state["x_csrf_token"]
     s.cookies.update(cookies_from(state))
 
     r = s.post(REFRESH_URL, timeout=20)
